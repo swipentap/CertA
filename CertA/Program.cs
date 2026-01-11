@@ -1,13 +1,10 @@
 using CertA.Data;
 using CertA.Models;
 using CertA.Services;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,64 +22,61 @@ builder.Host.UseSerilog((ctx, lc) =>
 
 builder.Services.AddControllersWithViews();
 
-// Add Entity Framework
-builder.Services.AddDbContext<CertA.Data.AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Database connection factory
+builder.Services.AddSingleton<IDatabaseConnectionFactory, DatabaseConnectionFactory>();
 
-// Configure Data Protection to use database
+// Custom authentication services
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+
+// Certificate services
+builder.Services.AddScoped<ICertificateService, CertificateService>();
+builder.Services.AddScoped<ICertificateAuthorityService, CertificateAuthorityService>();
+
+// Database initialization
+builder.Services.AddScoped<IDatabaseInitializationService, DatabaseInitializationService>();
+
+// Configure Cookie Authentication (replacing Identity)
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/Account/Login";
+        options.LogoutPath = "/Account/Logout";
+        options.AccessDeniedPath = "/Account/AccessDenied";
+        options.ExpireTimeSpan = TimeSpan.FromHours(12);
+        options.SlidingExpiration = true;
+        options.Events.OnValidatePrincipal = async context =>
+        {
+            // Custom validation if needed
+            await Task.CompletedTask;
+        };
+    });
+
+// Configure Data Protection (simplified - using file system for now, can be enhanced later)
 builder.Services.AddDataProtection()
-    .PersistKeysToDbContext<AppDbContext>();
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "DataProtection-Keys")));
 
-// Add Identity
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
-{
-    options.Password.RequireDigit = true;
-    options.Password.RequireLowercase = true;
-    options.Password.RequireUppercase = true;
-    options.Password.RequireNonAlphanumeric = false;
-    options.Password.RequiredLength = 6;
-
-    options.User.RequireUniqueEmail = true;
-    options.SignIn.RequireConfirmedEmail = false;
-})
-.AddEntityFrameworkStores<AppDbContext>()
-.AddDefaultTokenProviders();
-
-// Configure cookie settings
-builder.Services.ConfigureApplicationCookie(options =>
-{
-    options.LoginPath = "/Account/Login";
-    options.LogoutPath = "/Account/Logout";
-    options.AccessDeniedPath = "/Account/AccessDenied";
-    options.ExpireTimeSpan = TimeSpan.FromHours(12);
-    options.SlidingExpiration = true;
-});
-
-// Add services
-builder.Services.AddScoped<CertA.Services.ICertificateService, CertA.Services.CertificateService>();
-builder.Services.AddScoped<CertA.Services.ICertificateAuthorityService, CertA.Services.CertificateAuthorityService>();
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Ensure database is created and migrated
+// Initialize database schema
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    
+    var dbInit = scope.ServiceProvider.GetRequiredService<IDatabaseInitializationService>();
     try
     {
-        db.Database.Migrate();
+        await dbInit.InitializeDatabaseAsync();
     }
     catch (Exception ex)
     {
-        // If migration fails, ensure the database is created
-        Console.WriteLine($"Migration failed: {ex.Message}. Using EnsureCreated as fallback.");
-        db.Database.EnsureCreated();
+        Console.WriteLine($"Database initialization failed: {ex.Message}");
     }
 
     // Create default admin user if no users exist
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-    if (!userManager.Users.Any())
+    var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+    var existingUsers = await userService.GetUserByEmailAsync("admin@certa.local");
+    if (existingUsers == null)
     {
         var adminUser = new ApplicationUser
         {
@@ -94,8 +88,8 @@ using (var scope = app.Services.CreateScope())
             EmailConfirmed = true
         };
 
-        var result = await userManager.CreateAsync(adminUser, "Admin123!");
-        if (result.Succeeded)
+        var created = await userService.CreateUserAsync(adminUser, "Admin123!");
+        if (created)
         {
             Console.WriteLine("Default admin user created: admin@certa.local / Admin123!");
         }

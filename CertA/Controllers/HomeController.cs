@@ -1,9 +1,9 @@
 using CertA.Models;
 using CertA.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
+using System.Security.Claims;
 
 namespace CertA.Controllers
 {
@@ -12,18 +12,15 @@ namespace CertA.Controllers
         private readonly ILogger<HomeController> _logger;
         private readonly ICertificateService _certificateService;
         private readonly ICertificateAuthorityService _caService;
-        private readonly UserManager<ApplicationUser> _userManager;
 
         public HomeController(
             ILogger<HomeController> logger,
             ICertificateService certificateService,
-            ICertificateAuthorityService caService,
-            UserManager<ApplicationUser> userManager)
+            ICertificateAuthorityService caService)
         {
             _logger = logger;
             _certificateService = certificateService;
             _caService = caService;
-            _userManager = userManager;
         }
 
         [AllowAnonymous]
@@ -31,7 +28,7 @@ namespace CertA.Controllers
         {
             if (User.Identity?.IsAuthenticated == true)
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 var dashboardData = new DashboardViewModel
                 {
                     TotalCertificates = 0,

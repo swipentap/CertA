@@ -1,11 +1,9 @@
-using CertA.Data;
 using CertA.Models;
 using CertA.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Claims;
 
 namespace CertA.Controllers
 {
@@ -14,18 +12,15 @@ namespace CertA.Controllers
     {
         private readonly ICertificateService _service;
         private readonly ICertificateAuthorityService _caService;
-        private readonly UserManager<ApplicationUser> _userManager;
         private readonly ILogger<CertificatesController> _logger;
 
         public CertificatesController(
             ICertificateService service,
             ICertificateAuthorityService caService,
-            UserManager<ApplicationUser> userManager,
             ILogger<CertificatesController> logger)
         {
             _service = service;
             _caService = caService;
-            _userManager = userManager;
             _logger = logger;
         }
 
@@ -33,7 +28,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -52,7 +47,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -92,7 +87,7 @@ namespace CertA.Controllers
 
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -105,8 +100,9 @@ namespace CertA.Controllers
             }
             catch (Exception ex)
             {
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 _logger.LogError(ex, "Failed to create {Type} certificate for {CommonName} by user {UserId}: {Message}", 
-                    vm.Type, vm.CommonName, _userManager.GetUserId(User), ex.Message);
+                    vm.Type, vm.CommonName, userId, ex.Message);
                 ModelState.AddModelError("", $"Failed to create certificate: {ex.Message}");
                 return View(vm);
             }
@@ -116,7 +112,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -139,7 +135,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -162,7 +158,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -185,7 +181,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -208,7 +204,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");
@@ -292,7 +288,7 @@ namespace CertA.Controllers
         {
             try
             {
-                var userId = _userManager.GetUserId(User);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
                     return RedirectToAction("Login", "Account");

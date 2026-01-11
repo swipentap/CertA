@@ -1,6 +1,7 @@
 using CertA.Data;
 using CertA.Models;
-using Microsoft.EntityFrameworkCore;
+using System.Data;
+using Dapper;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -19,28 +20,39 @@ namespace CertA.Services
 
     public class CertificateAuthorityService : ICertificateAuthorityService
     {
-        private readonly AppDbContext _db;
+        private readonly IDatabaseConnectionFactory _connectionFactory;
         private readonly ILogger<CertificateAuthorityService> _logger;
 
-        public CertificateAuthorityService(AppDbContext db, ILogger<CertificateAuthorityService> logger)
+        public CertificateAuthorityService(IDatabaseConnectionFactory connectionFactory, ILogger<CertificateAuthorityService> logger)
         {
-            _db = db;
+            _connectionFactory = connectionFactory;
             _logger = logger;
         }
 
         public async Task<CertificateAuthority?> GetActiveCAAsync()
         {
-            return await _db.CertificateAuthorities
-                .Where(ca => ca.IsActive && ca.ExpiryDate > DateTime.UtcNow)
-                .OrderByDescending(ca => ca.CreatedDate)
-                .FirstOrDefaultAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"
+                SELECT ""Id"", ""Name"", ""CommonName"", ""Organization"", ""Country"", ""State"", ""Locality"",
+                       ""CertificatePem"", ""PrivateKeyPem"", ""CreatedDate"", ""ExpiryDate"", ""IsActive""
+                FROM ""CertificateAuthorities""
+                WHERE ""IsActive"" = true AND ""ExpiryDate"" > @Now
+                ORDER BY ""CreatedDate"" DESC
+                LIMIT 1";
+            
+            return await connection.QueryFirstOrDefaultAsync<CertificateAuthority>(sql, new { Now = DateTime.UtcNow });
         }
 
         public async Task<List<CertificateAuthority>> GetAllCAsAsync()
         {
-            return await _db.CertificateAuthorities
-                .OrderByDescending(ca => ca.CreatedDate)
-                .ToListAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"
+                SELECT ""Id"", ""Name"", ""CommonName"", ""Organization"", ""Country"", ""State"", ""Locality"",
+                       ""CertificatePem"", ""PrivateKeyPem"", ""CreatedDate"", ""ExpiryDate"", ""IsActive""
+                FROM ""CertificateAuthorities""
+                ORDER BY ""CreatedDate"" DESC";
+            
+            return (await connection.QueryAsync<CertificateAuthority>(sql)).ToList();
         }
 
         public async Task<CertificateAuthority> CreateRootCAAsync(string name, string commonName, string organization, string country, string state, string locality)
@@ -91,8 +103,18 @@ namespace CertA.Services
                 IsActive = true
             };
 
-            _db.CertificateAuthorities.Add(ca);
-            await _db.SaveChangesAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            connection.Open();
+            
+            var insertSql = @"
+                INSERT INTO ""CertificateAuthorities"" (""Name"", ""CommonName"", ""Organization"", ""Country"", ""State"", ""Locality"",
+                                                       ""CertificatePem"", ""PrivateKeyPem"", ""CreatedDate"", ""ExpiryDate"", ""IsActive"")
+                VALUES (@Name, @CommonName, @Organization, @Country, @State, @Locality,
+                        @CertificatePem, @PrivateKeyPem, @CreatedDate, @ExpiryDate, @IsActive)
+                RETURNING ""Id""";
+            
+            var newId = await connection.QuerySingleAsync<int>(insertSql, ca);
+            ca.Id = newId;
 
             _logger.LogInformation("Created root CA {Name} with serial {Serial}", name, serialNumber);
             return ca;
@@ -100,15 +122,18 @@ namespace CertA.Services
 
         public async Task<bool> DeactivateCAAsync(int caId)
         {
-            var ca = await _db.CertificateAuthorities.FindAsync(caId);
-            if (ca == null)
-                return false;
-
-            ca.IsActive = false;
-            await _db.SaveChangesAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"UPDATE ""CertificateAuthorities"" SET ""IsActive"" = false WHERE ""Id"" = @Id";
             
-            _logger.LogInformation("Deactivated CA {Name} (ID: {Id})", ca.Name, caId);
-            return true;
+            var rowsAffected = await connection.ExecuteAsync(sql, new { Id = caId });
+            
+            if (rowsAffected > 0)
+            {
+                _logger.LogInformation("Deactivated CA (ID: {Id})", caId);
+                return true;
+            }
+            
+            return false;
         }
 
         public async Task<X509Certificate2> SignCertificateAsync(CertificateRequest request, string commonName, string? sans, CertificateType type)

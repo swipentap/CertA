@@ -1,7 +1,7 @@
 using CertA.Data;
 using CertA.Models;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
+using System.Data;
+using Dapper;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -26,30 +26,42 @@ namespace CertA.Services
 
     public class CertificateService : ICertificateService
     {
-        private readonly AppDbContext _db;
+        private readonly IDatabaseConnectionFactory _connectionFactory;
         private readonly ICertificateAuthorityService _caService;
         private readonly ILogger<CertificateService> _logger;
 
-        public CertificateService(AppDbContext db, ICertificateAuthorityService caService, ILogger<CertificateService> logger)
+        public CertificateService(IDatabaseConnectionFactory connectionFactory, ICertificateAuthorityService caService, ILogger<CertificateService> logger)
         {
-            _db = db;
+            _connectionFactory = connectionFactory;
             _caService = caService;
             _logger = logger;
         }
 
-        public Task<List<CertificateEntity>> ListAsync(string userId)
+        public async Task<List<CertificateEntity>> ListAsync(string userId)
         {
-            return _db.Certificates
-                .Where(c => c.UserId == userId)
-                .OrderByDescending(c => c.Id)
-                .ToListAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"
+                SELECT ""Id"", ""CommonName"", ""SubjectAlternativeNames"", ""SerialNumber"", 
+                       ""IssuedDate"", ""ExpiryDate"", ""Status"", ""Type"", 
+                       ""CertificatePem"", ""PublicKeyPem"", ""PrivateKeyPem"", ""UserId""
+                FROM ""Certificates""
+                WHERE ""UserId"" = @UserId
+                ORDER BY ""Id"" DESC";
+            
+            return (await connection.QueryAsync<CertificateEntity>(sql, new { UserId = userId })).ToList();
         }
 
-        public Task<CertificateEntity?> GetAsync(int id, string userId)
+        public async Task<CertificateEntity?> GetAsync(int id, string userId)
         {
-            return _db.Certificates
-                .Where(c => c.Id == id && c.UserId == userId)
-                .FirstOrDefaultAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"
+                SELECT ""Id"", ""CommonName"", ""SubjectAlternativeNames"", ""SerialNumber"", 
+                       ""IssuedDate"", ""ExpiryDate"", ""Status"", ""Type"", 
+                       ""CertificatePem"", ""PublicKeyPem"", ""PrivateKeyPem"", ""UserId""
+                FROM ""Certificates""
+                WHERE ""Id"" = @Id AND ""UserId"" = @UserId";
+            
+            return await connection.QueryFirstOrDefaultAsync<CertificateEntity>(sql, new { Id = id, UserId = userId });
         }
 
         public async Task<CertificateEntity> CreateAsync(string commonName, string? sans, CertificateType type, string userId)
@@ -101,8 +113,21 @@ namespace CertA.Services
                 UserId = userId
             };
 
-            _db.Certificates.Add(entity);
-            await _db.SaveChangesAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            connection.Open();
+            
+            var insertSql = @"
+                INSERT INTO ""Certificates"" (""CommonName"", ""SubjectAlternativeNames"", ""SerialNumber"", 
+                                              ""IssuedDate"", ""ExpiryDate"", ""Status"", ""Type"", 
+                                              ""CertificatePem"", ""PublicKeyPem"", ""PrivateKeyPem"", ""UserId"")
+                VALUES (@CommonName, @SubjectAlternativeNames, @SerialNumber, 
+                        @IssuedDate, @ExpiryDate, @Status, @Type, 
+                        @CertificatePem, @PublicKeyPem, @PrivateKeyPem, @UserId)
+                RETURNING ""Id""";
+            
+            var newId = await connection.QuerySingleAsync<int>(insertSql, entity);
+            entity.Id = newId;
+            
             _logger.LogInformation("Created {Type} certificate {Serial} for {CN} by user {UserId}", type, serialNumber, commonName, userId);
             return entity;
         }
@@ -136,64 +161,65 @@ namespace CertA.Services
         {
             var thresholdDate = DateTime.UtcNow.AddDays(daysThreshold);
             
-            return await _db.Certificates
-                .Where(c => c.Status == CertificateStatus.Issued && 
-                           c.ExpiryDate <= thresholdDate && 
-                           c.ExpiryDate > DateTime.UtcNow)
-                .OrderBy(c => c.ExpiryDate)
-                .ToListAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"
+                SELECT ""Id"", ""CommonName"", ""SubjectAlternativeNames"", ""SerialNumber"", 
+                       ""IssuedDate"", ""ExpiryDate"", ""Status"", ""Type"", 
+                       ""CertificatePem"", ""PublicKeyPem"", ""PrivateKeyPem"", ""UserId""
+                FROM ""Certificates""
+                WHERE ""Status"" = @Status 
+                  AND ""ExpiryDate"" <= @ThresholdDate 
+                  AND ""ExpiryDate"" > @Now
+                ORDER BY ""ExpiryDate""";
+            
+            return (await connection.QueryAsync<CertificateEntity>(sql, new 
+            { 
+                Status = (int)CertificateStatus.Issued, 
+                ThresholdDate = thresholdDate, 
+                Now = DateTime.UtcNow 
+            })).ToList();
         }
 
         public async Task<bool> DeleteAsync(int id, string userId)
         {
-            var certificate = await _db.Certificates
-                .Where(c => c.Id == id && c.UserId == userId)
-                .FirstOrDefaultAsync();
-
-            if (certificate == null)
-            {
-                return false;
-            }
-
-            _db.Certificates.Remove(certificate);
-            await _db.SaveChangesAsync();
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"DELETE FROM ""Certificates"" WHERE ""Id"" = @Id AND ""UserId"" = @UserId";
             
-            _logger.LogInformation("Deleted certificate {Id} ({CommonName}) for user {UserId}", id, certificate.CommonName, userId);
-            return true;
+            var rowsAffected = await connection.ExecuteAsync(sql, new { Id = id, UserId = userId });
+            
+            if (rowsAffected > 0)
+            {
+                _logger.LogInformation("Deleted certificate {Id} for user {UserId}", id, userId);
+                return true;
+            }
+            
+            return false;
         }
 
         public async Task<byte[]> GetPrivateKeyPemAsync(int id, string userId)
         {
-            var cert = await _db.Certificates
-                .Where(c => c.Id == id && c.UserId == userId)
-                .FirstOrDefaultAsync();
+            var cert = await GetAsync(id, userId);
             if (cert?.PrivateKeyPem == null) throw new InvalidOperationException("Certificate or private key not found");
             return Encoding.UTF8.GetBytes(cert.PrivateKeyPem);
         }
 
         public async Task<byte[]> GetPublicKeyPemAsync(int id, string userId)
         {
-            var cert = await _db.Certificates
-                .Where(c => c.Id == id && c.UserId == userId)
-                .FirstOrDefaultAsync();
+            var cert = await GetAsync(id, userId);
             if (cert?.PublicKeyPem == null) throw new InvalidOperationException("Certificate or public key not found");
             return Encoding.UTF8.GetBytes(cert.PublicKeyPem);
         }
 
         public async Task<byte[]> GetCertificatePemAsync(int id, string userId)
         {
-            var cert = await _db.Certificates
-                .Where(c => c.Id == id && c.UserId == userId)
-                .FirstOrDefaultAsync();
+            var cert = await GetAsync(id, userId);
             if (cert?.CertificatePem == null) throw new InvalidOperationException("Certificate not found");
             return Encoding.UTF8.GetBytes(cert.CertificatePem);
         }
 
         public async Task<byte[]> GetPfxAsync(int id, string password, string userId)
         {
-            var cert = await _db.Certificates
-                .Where(c => c.Id == id && c.UserId == userId)
-                .FirstOrDefaultAsync();
+            var cert = await GetAsync(id, userId);
             if (cert?.CertificatePem == null || cert?.PrivateKeyPem == null)
                 throw new InvalidOperationException("Certificate or private key not found");
 
@@ -217,9 +243,7 @@ namespace CertA.Services
 
         public async Task<byte[]> GetHAProxyFormatAsync(int id, string userId)
         {
-            var cert = await _db.Certificates
-                .Where(c => c.Id == id && c.UserId == userId)
-                .FirstOrDefaultAsync();
+            var cert = await GetAsync(id, userId);
             if (cert?.CertificatePem == null || cert?.PrivateKeyPem == null)
                 throw new InvalidOperationException("Certificate or private key not found");
 

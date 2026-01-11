@@ -1,31 +1,41 @@
 using CertA.Models;
+using CertA.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
+using AuthService = CertA.Services.IAuthenticationService;
 
 namespace CertA.Controllers
 {
     public class AccountController : Controller
     {
-        private readonly UserManager<ApplicationUser> _userManager;
-        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly IUserService _userService;
+        private readonly AuthService _authService;
         private readonly ILogger<AccountController> _logger;
 
         public AccountController(
-            UserManager<ApplicationUser> userManager,
-            SignInManager<ApplicationUser> signInManager,
+            IUserService userService,
+            AuthService authService,
             ILogger<AccountController> logger)
         {
-            _userManager = userManager;
-            _signInManager = signInManager;
+            _userService = userService;
+            _authService = authService;
             _logger = logger;
         }
 
         [Authorize]
         public async Task<IActionResult> Profile()
         {
-            var user = await _userManager.GetUserAsync(User);
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return RedirectToAction("Login");
+            }
+
+            var user = await _userService.GetUserByIdAsync(userId);
             if (user == null)
             {
                 return RedirectToAction("Login");
@@ -54,7 +64,13 @@ namespace CertA.Controllers
                 return View(model);
             }
 
-            var user = await _userManager.GetUserAsync(User);
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return RedirectToAction("Login");
+            }
+
+            var user = await _userService.GetUserByIdAsync(userId);
             if (user == null)
             {
                 return RedirectToAction("Login");
@@ -65,19 +81,15 @@ namespace CertA.Controllers
             user.LastName = model.LastName;
             user.Organization = model.Organization;
 
-            var result = await _userManager.UpdateAsync(user);
-            if (result.Succeeded)
+            var updated = await _userService.UpdateUserAsync(user);
+            if (updated)
             {
                 TempData["SuccessMessage"] = "Profile updated successfully!";
                 _logger.LogInformation("User {Email} updated their profile", user.Email);
                 return RedirectToAction("Profile");
             }
 
-            foreach (var error in result.Errors)
-            {
-                ModelState.AddModelError("", error.Description);
-            }
-
+            ModelState.AddModelError("", "Failed to update profile.");
             return View(model);
         }
 
@@ -92,14 +104,20 @@ namespace CertA.Controllers
                 return RedirectToAction("Profile");
             }
 
-            var user = await _userManager.GetUserAsync(User);
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return RedirectToAction("Login");
+            }
+
+            var user = await _userService.GetUserByIdAsync(userId);
             if (user == null)
             {
                 return RedirectToAction("Login");
             }
 
-            var result = await _userManager.ChangePasswordAsync(user, model.CurrentPassword, model.NewPassword);
-            if (result.Succeeded)
+            var result = await _userService.ChangePasswordAsync(user, model.CurrentPassword, model.NewPassword);
+            if (result)
             {
                 TempData["SuccessMessage"] = "Password changed successfully!";
                 _logger.LogInformation("User {Email} changed their password", user.Email);
@@ -127,9 +145,18 @@ namespace CertA.Controllers
 
             if (ModelState.IsValid)
             {
-                var result = await _signInManager.PasswordSignInAsync(model.Email, model.Password, model.RememberMe, lockoutOnFailure: false);
-                if (result.Succeeded)
+                var user = await _authService.SignInAsync(model.Email, model.Password, model.RememberMe);
+                if (user != null)
                 {
+                    var principal = await _authService.CreateClaimsPrincipalAsync(user);
+                    var authProperties = new AuthenticationProperties
+                    {
+                        IsPersistent = model.RememberMe,
+                        ExpiresUtc = model.RememberMe ? DateTimeOffset.UtcNow.AddDays(30) : DateTimeOffset.UtcNow.AddHours(12)
+                    };
+
+                    await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, authProperties);
+                    
                     _logger.LogInformation("User logged in: {Email}", model.Email);
                     return RedirectToLocal(returnUrl);
                 }
@@ -167,18 +194,19 @@ namespace CertA.Controllers
                     Organization = model.Organization
                 };
 
-                var result = await _userManager.CreateAsync(user, model.Password);
-                if (result.Succeeded)
+                var created = await _userService.CreateUserAsync(user, model.Password);
+                if (created)
                 {
                     _logger.LogInformation("User created a new account with password: {Email}", model.Email);
 
-                    await _signInManager.SignInAsync(user, isPersistent: false);
+                    var principal = await _authService.CreateClaimsPrincipalAsync(user);
+                    await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
+                    
                     return RedirectToLocal(returnUrl);
                 }
-
-                foreach (var error in result.Errors)
+                else
                 {
-                    ModelState.AddModelError(string.Empty, error.Description);
+                    ModelState.AddModelError(string.Empty, "Failed to create account. Email may already be in use.");
                 }
             }
 
@@ -189,7 +217,7 @@ namespace CertA.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Logout()
         {
-            await _signInManager.SignOutAsync();
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             _logger.LogInformation("User logged out.");
             return RedirectToAction("Index", "Home");
         }
