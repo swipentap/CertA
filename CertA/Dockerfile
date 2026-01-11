@@ -20,4 +20,5 @@ RUN dotnet publish "./CertA.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:U
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+COPY --from=build /src/CertA/Scripts ./Scripts
 ENTRYPOINT ["dotnet", "CertA.dll"]
