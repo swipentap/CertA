@@ -3,3 +3,6 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/CertA/DataProtection-Keys/
+
+# ASP.NET Core Data Protection key ring (sensitive)
+**/DataProtection-Keys/
