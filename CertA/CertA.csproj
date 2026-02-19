@@ -11,6 +11,7 @@
         <PackageReference Include="Dapper" Version="2.1.35" />
         <PackageReference Include="Npgsql" Version="9.0.2" />
         <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="9.0.0" />
         <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
         <PackageReference Include="Serilog.Sinks.PostgreSQL" Version="2.3.0" />
     </ItemGroup>
@@ -19,6 +20,7 @@
       <Content Include="..\.dockerignore">
         <Link>.dockerignore</Link>
       </Content>
+      <Content Include="Scripts\**\*" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
 </Project>

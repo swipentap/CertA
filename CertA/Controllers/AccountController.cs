@@ -1,9 +1,12 @@
 using CertA.Models;
+using CertA.Options;
 using CertA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using AuthService = CertA.Services.IAuthenticationService;
@@ -14,15 +17,18 @@ namespace CertA.Controllers
     {
         private readonly IUserService _userService;
         private readonly AuthService _authService;
+        private readonly KeycloakOptions _keycloakOptions;
         private readonly ILogger<AccountController> _logger;
 
         public AccountController(
             IUserService userService,
             AuthService authService,
+            IOptions<KeycloakOptions> keycloakOptions,
             ILogger<AccountController> logger)
         {
             _userService = userService;
             _authService = authService;
+            _keycloakOptions = keycloakOptions.Value;
             _logger = logger;
         }
 
@@ -130,13 +136,28 @@ namespace CertA.Controllers
             return RedirectToAction("Profile");
         }
 
+        [AllowAnonymous]
+        [HttpGet]
+        public IActionResult AccessDenied(string? message = null)
+        {
+            ViewData["Message"] = message ?? "You do not have access to this application.";
+            ViewData["HideLoginRegisterInNav"] = true;
+            return View();
+        }
+
+        [AllowAnonymous]
         [HttpGet]
         public IActionResult Login(string? returnUrl = null)
         {
+            if (_keycloakOptions.Enabled)
+            {
+                return Challenge(new AuthenticationProperties { RedirectUri = returnUrl ?? "/" }, OpenIdConnectDefaults.AuthenticationScheme);
+            }
             ViewData["ReturnUrl"] = returnUrl;
             return View();
         }
 
+        [AllowAnonymous]
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Login(LoginViewModel model, string? returnUrl = null)
@@ -213,13 +234,23 @@ namespace CertA.Controllers
             return View(model);
         }
 
+        [AllowAnonymous]
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Logout()
         {
-            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             _logger.LogInformation("User logged out.");
-            return RedirectToAction("Index", "Home");
+            if (_keycloakOptions.Enabled)
+            {
+                await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                var redirectUri = $"{Request.Scheme}://{Request.Host}/";
+                var authority = _keycloakOptions.Authority.TrimEnd('/');
+                var logoutUrl = $"{authority}/protocol/openid-connect/logout?client_id={Uri.EscapeDataString(_keycloakOptions.ClientId)}&post_logout_redirect_uri={Uri.EscapeDataString(redirectUri)}";
+                return Redirect(logoutUrl);
+            }
+            return SignOut(
+                new AuthenticationProperties { RedirectUri = Url.Action("Index", "Home") ?? "/" },
+                CookieAuthenticationDefaults.AuthenticationScheme);
         }
 
         private IActionResult RedirectToLocal(string? returnUrl)

@@ -223,7 +223,6 @@ namespace CertA.Controllers
             }
         }
 
-        [AllowAnonymous]
         public async Task<IActionResult> Authority()
         {
             try
@@ -242,7 +241,6 @@ namespace CertA.Controllers
             }
         }
 
-        [AllowAnonymous]
         public async Task<IActionResult> DownloadRootCA()
         {
             try
@@ -260,7 +258,6 @@ namespace CertA.Controllers
             }
         }
 
-        [AllowAnonymous]
         public async Task<IActionResult> DownloadRootCAPfx(string password = "password")
         {
             try

@@ -12,5 +12,7 @@ namespace CertA.Services
         Task<bool> VerifyPasswordAsync(ApplicationUser user, string password);
         Task<bool> ChangePasswordAsync(ApplicationUser user, string currentPassword, string newPassword);
         Task<bool> CheckPasswordAsync(ApplicationUser user, string password);
+        Task<IList<string>> GetUserRolesAsync(string userId);
+        Task EnsureUserInRoleAsync(string userId, string roleName);
     }
 }

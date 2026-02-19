@@ -74,6 +74,12 @@ CertA is a comprehensive Certification Authority system with user authentication
   - 🗄️ Database design and relationships
   - 🔒 Security architecture and best practices
 
+#### [Keycloak (OAuth2) Authentication](KEYCLOAK.md) - External identity provider
+- **Purpose**: Configure CertA and Keycloak for OAuth2 / OpenID Connect login
+- **Audience**: Administrators, DevOps
+- **Content**: Keycloak client setup, CertA configuration, Docker notes, troubleshooting
+- **Key Sections**: Keycloak client and redirect URIs, CertA Authentication:Keycloak settings, SSL/PAR notes, first-login provisioning
+
 #### [Deployment Guide](DEPLOYMENT.md) - Production Deployment
 - **Purpose**: Production deployment and operations
 - **Audience**: System administrators, DevOps engineers
@@ -108,6 +114,7 @@ CertA is a comprehensive Certification Authority system with user authentication
 ### 🔐 Authentication & Authorization
 - **User Registration**: Self-service account creation
 - **Secure Login**: Password-based authentication with session management
+- **Keycloak (OAuth2)**: Optional login via Keycloak; see [Keycloak guide](KEYCLOAK.md)
 - **User Isolation**: Each user can only access their own certificates
 - **Profile Management**: User information and password updates
 - **Session Security**: Configurable session timeouts and security

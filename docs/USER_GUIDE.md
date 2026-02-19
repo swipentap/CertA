@@ -57,14 +57,16 @@ Complete guide for using the CertA Certification Authority system.
    - Click "Login" in the navigation bar
    - Or navigate to `/Account/Login`
 
-2. **Enter Credentials**
+2. **If your organization uses Keycloak (single sign-on)**
+   - Clicking "Login" will redirect you to your identity provider (Keycloak)
+   - Sign in there with your usual credentials
+   - You will be returned to CertA and signed in; on first login, a CertA account is created automatically from your identity
+
+3. **If CertA uses built-in login (no Keycloak)**
    - **Email**: Your registered email address
    - **Password**: Your account password
    - **Remember Me**: Check to stay logged in (optional)
-
-3. **Authentication**
-   - Click "Login"
-   - You'll be redirected to the dashboard or your intended destination
+   - Click "Login" to be redirected to the dashboard or your intended destination
 
 ### Managing Your Profile
 

@@ -37,7 +37,7 @@ namespace CertA.Services
             return Task.CompletedTask;
         }
 
-        public Task<ClaimsPrincipal> CreateClaimsPrincipalAsync(ApplicationUser user)
+        public async Task<ClaimsPrincipal> CreateClaimsPrincipalAsync(ApplicationUser user)
         {
             var claims = new List<Claim>
             {
@@ -48,14 +48,21 @@ namespace CertA.Services
 
             if (!string.IsNullOrEmpty(user.FirstName))
                 claims.Add(new Claim(ClaimTypes.GivenName, user.FirstName));
-            
+
             if (!string.IsNullOrEmpty(user.LastName))
                 claims.Add(new Claim(ClaimTypes.Surname, user.LastName));
 
+            var roles = await _userService.GetUserRolesAsync(user.Id);
+            foreach (var role in roles)
+            {
+                if (!string.IsNullOrEmpty(role))
+                    claims.Add(new Claim(ClaimTypes.Role, role));
+            }
+
             var identity = new ClaimsIdentity(claims, "Cookies");
             var principal = new ClaimsPrincipal(identity);
-            
-            return Task.FromResult(principal);
+
+            return principal;
         }
     }
 }

@@ -25,18 +25,27 @@ services:
       dockerfile: CertA/Dockerfile
     container_name: certa-app
     ports:
-      - "8080:8080"
+      - "8443:8081"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:8081
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/app/cert.pfx
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=
       - ConnectionStrings__DefaultConnection=Host=postgres;Database=certa;Username=certa;Password=certa123;Port=5432
       - ASPNETCORE_DATA_PROTECTION__DEFAULT_KEY_LIFETIME=90
       - ASPNETCORE_DATA_PROTECTION__KEY_RING_AUTO_GENERATE_KEYS=true
+      - Authentication__Keycloak__Enabled=true
+      - Authentication__Keycloak__Authority=https://auth.dev.net/auth/realms/master
+      - Authentication__Keycloak__ClientId=certa
+      - Authentication__Keycloak__ClientSecret=
+      - Authentication__Keycloak__CallbackPath=/signin-oidc
+      - Authentication__Keycloak__RequireHttpsMetadata=false
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "wget -q -O- --no-check-certificate https://localhost:8081/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

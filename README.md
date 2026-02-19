@@ -12,6 +12,7 @@ A comprehensive Certification Authority (CA) system with web-based certificate m
 
 ### 🔐 Authentication & Authorization
 - **User Registration & Login** - Secure user account management
+- **Keycloak (OAuth2 / OpenID Connect)** - Optional external identity provider; when enabled, login is via Keycloak with automatic user provisioning by email
 - **User Isolation** - Each user can only see and manage their own certificates
 - **Profile Management** - Users can update their information and change passwords
 - **Session Management** - Configurable cookie-based authentication with 12-hour sessions
@@ -152,16 +153,36 @@ ConnectionStrings__DefaultConnection=Host=postgres;Database=certa;Username=certa
 ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_DATA_PROTECTION__DEFAULT_KEY_LIFETIME=90
 ASPNETCORE_DATA_PROTECTION__KEY_RING_AUTO_GENERATE_KEYS=true
+
+# Keycloak (OAuth2 / OpenID Connect) - optional
+Authentication__Keycloak__Enabled=true
+Authentication__Keycloak__Authority=https://auth.example.com/realms/myrealm
+Authentication__Keycloak__ClientId=certa
+Authentication__Keycloak__ClientSecret=
+Authentication__Keycloak__CallbackPath=/signin-oidc
+Authentication__Keycloak__RequireHttpsMetadata=true
 ```
+
+See **[Keycloak authentication](docs/KEYCLOAK.md)** for full configuration of CertA and Keycloak.
+
+### Keycloak (OAuth2) authentication
+
+When `Authentication:Keycloak:Enabled` is `true`, login uses Keycloak instead of the built-in form. You must:
+
+1. **In Keycloak:** Create a client (e.g. `certa`), set **Valid redirect URIs** to `https://<your-certa-url>/signin-oidc`, and optionally set a client secret.
+2. **In CertA:** Set Authority (realm URL), ClientId, ClientSecret (if any), and CallbackPath `/signin-oidc`.
+
+Users signing in via Keycloak are created in CertA automatically (by email) on first login. Full step-by-step instructions: **[docs/KEYCLOAK.md](docs/KEYCLOAK.md)**.
 
 ### Docker Configuration
 - **PostgreSQL**: External database support
-- **Web Application**: Port 8080 (host) → 8080 (container)
+- **Web Application**: Port 8080 (host) → 8080 (container), or HTTPS on 8443 (host) → 8081 (container) when using TLS
 - **Multi-replica Support**: Configurable replica count for high availability
 
 ## 📚 Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[Keycloak (OAuth2) authentication](docs/KEYCLOAK.md)** - Configure CertA and Keycloak for external login
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment instructions
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - Technical architecture details
 - **[User Guide](docs/USER_GUIDE.md)** - End-user documentation

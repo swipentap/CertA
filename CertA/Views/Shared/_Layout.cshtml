@@ -1,4 +1,5 @@
-﻿<!DOCTYPE html>
+@inject Microsoft.Extensions.Options.IOptions<CertA.Options.KeycloakOptions> KeycloakOptions
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -29,7 +30,10 @@
                                 <i class="bi bi-house"></i> Home
                             </a>
                         </li>
-                        @if (User.Identity?.IsAuthenticated == true)
+                        @{
+                            var isLoggedIn = User.Identity?.IsAuthenticated == true || User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value != null;
+                        }
+                        @if (isLoggedIn)
                         {
                             <li class="nav-item">
                                 <a class="nav-link text-light" href="/Certificates">
@@ -44,23 +48,33 @@
                         </li>
                     </ul>
                     <ul class="navbar-nav">
-                        @if (User.Identity?.IsAuthenticated == true)
+                        @if (isLoggedIn)
                         {
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle text-light" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                    <i class="bi bi-person-circle"></i> @User.Identity.Name
+                                    <i class="bi bi-person-circle"></i> @(User.Identity?.Name ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "Account")
                                 </a>
                                 <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
                                     <li><a class="dropdown-item" href="/Account/Profile"><i class="bi bi-person"></i> Profile</a></li>
                                     <li><hr class="dropdown-divider"></li>
                                     <li>
-                                        <form asp-controller="Account" asp-action="Logout" method="post" style="display: inline;">
-                                            <button type="submit" class="dropdown-item">
+                                        <form asp-controller="Account" asp-action="Logout" method="post" style="display: inline;" asp-antiforgery="true">
+                                            <button type="submit" class="dropdown-item" name="logout" value="logout">
                                                 <i class="bi bi-box-arrow-right"></i> Logout
                                             </button>
                                         </form>
                                     </li>
                                 </ul>
+                            </li>
+                        }
+                        else if (ViewData["HideLoginRegisterInNav"] as bool? == true && KeycloakOptions.Value.Enabled)
+                        {
+                            <li class="nav-item">
+                                <form asp-controller="Account" asp-action="Logout" method="post" class="d-inline" asp-antiforgery="true">
+                                    <button type="submit" class="btn btn-link nav-link text-light p-0 border-0" name="logout" value="logout">
+                                        <i class="bi bi-box-arrow-right"></i> Logout
+                                    </button>
+                                </form>
                             </li>
                         }
                         else
@@ -70,11 +84,14 @@
                                     <i class="bi bi-box-arrow-in-right"></i> Login
                                 </a>
                             </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-light" href="/Account/Register">
-                                    <i class="bi bi-person-plus"></i> Register
-                                </a>
-                            </li>
+                            @if (!KeycloakOptions.Value.Enabled)
+                            {
+                                <li class="nav-item">
+                                    <a class="nav-link text-light" href="/Account/Register">
+                                        <i class="bi bi-person-plus"></i> Register
+                                    </a>
+                                </li>
+                            }
                         }
                     </ul>
                 </div>

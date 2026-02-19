@@ -37,10 +37,16 @@ namespace CertA.Services
                 using var connection = await _connectionFactory.CreateConnectionAsync();
                 connection.Open();
                 
-                // Execute schema SQL
                 await connection.ExecuteAsync(schemaSql);
-                
                 _logger.LogInformation("Database schema initialized successfully");
+
+                var acmeSchemaPath = Path.Combine(AppContext.BaseDirectory, "Scripts", "acme-schema.sql");
+                if (File.Exists(acmeSchemaPath))
+                {
+                    var acmeSchemaSql = await File.ReadAllTextAsync(acmeSchemaPath);
+                    await connection.ExecuteAsync(acmeSchemaSql);
+                    _logger.LogInformation("ACME schema initialized successfully");
+                }
             }
             catch (Exception ex)
             {

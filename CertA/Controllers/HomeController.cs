@@ -23,7 +23,6 @@ namespace CertA.Controllers
             _caService = caService;
         }
 
-        [AllowAnonymous]
         public async Task<IActionResult> Index()
         {
             if (User.Identity?.IsAuthenticated == true)
@@ -63,7 +62,6 @@ namespace CertA.Controllers
             }
         }
 
-        [AllowAnonymous]
         public IActionResult Privacy()
         {
             return View();

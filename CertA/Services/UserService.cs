@@ -168,5 +168,57 @@ namespace CertA.Services
             
             return rowsAffected > 0;
         }
+
+        public async Task<IList<string>> GetUserRolesAsync(string userId)
+        {
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            var sql = @"
+                SELECT r.""Name"" FROM ""UserRoles"" ur
+                INNER JOIN ""Roles"" r ON ur.""RoleId"" = r.""Id""
+                WHERE ur.""UserId"" = @UserId AND r.""Name"" IS NOT NULL";
+            var list = (await connection.QueryAsync<string>(sql, new { UserId = userId })).ToList();
+            return list;
+        }
+
+        public async Task EnsureUserInRoleAsync(string userId, string roleName)
+        {
+            if (string.IsNullOrEmpty(roleName)) return;
+            using var connection = await _connectionFactory.CreateConnectionAsync();
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                var normalizedName = roleName.ToUpperInvariant();
+                var roleId = await connection.QueryFirstOrDefaultAsync<string>(
+                    @"SELECT ""Id"" FROM ""Roles"" WHERE ""NormalizedName"" = @NormalizedName",
+                    new { NormalizedName = normalizedName },
+                    transaction);
+                if (string.IsNullOrEmpty(roleId))
+                {
+                    roleId = Guid.NewGuid().ToString();
+                    await connection.ExecuteAsync(
+                        @"INSERT INTO ""Roles"" (""Id"", ""Name"", ""NormalizedName"", ""ConcurrencyStamp"") VALUES (@Id, @Name, @NormalizedName, @ConcurrencyStamp)",
+                        new { Id = roleId, Name = roleName, NormalizedName = normalizedName, ConcurrencyStamp = Guid.NewGuid().ToString() },
+                        transaction);
+                }
+                var exists = await connection.ExecuteScalarAsync<int>(
+                    @"SELECT COUNT(1) FROM ""UserRoles"" WHERE ""UserId"" = @UserId AND ""RoleId"" = @RoleId",
+                    new { UserId = userId, RoleId = roleId },
+                    transaction);
+                if (exists == 0)
+                {
+                    await connection.ExecuteAsync(
+                        @"INSERT INTO ""UserRoles"" (""UserId"", ""RoleId"") VALUES (@UserId, @RoleId)",
+                        new { UserId = userId, RoleId = roleId },
+                        transaction);
+                }
+                transaction.Commit();
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+        }
     }
 }
