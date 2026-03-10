@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Assign the certa client role "admin" to a Keycloak user (so CertA accepts them).
-# Usage: KEYCLOAK_ADMIN_USER=admin KEYCLOAK_ADMIN_PASSWORD=admin KEYCLOAK_TEST_USER=admin ./assign-certa-admin-role.sh
+# Assign the certa client role "admin" to an OAuth2 IdP user (so CertA accepts them).
+# Usage: OAUTH2_IDP_ADMIN_USER=admin OAUTH2_IDP_ADMIN_PASSWORD=admin OAUTH2_TEST_USER=admin ./assign-certa-admin-role.sh
 
 set -e
 
-BASE="${KEYCLOAK_BASE_URL:-https://auth.dev.net/auth}"
-REALM="${KEYCLOAK_REALM:-master}"
-ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
-ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
-TARGET_USER="${KEYCLOAK_TEST_USER:-admin}"
+BASE="${OAUTH2_IDP_BASE_URL:-https://auth.dev.net/auth}"
+REALM="${OAUTH2_IDP_REALM:-master}"
+ADMIN_USER="${OAUTH2_IDP_ADMIN_USER:-admin}"
+ADMIN_PASS="${OAUTH2_IDP_ADMIN_PASSWORD:-admin}"
+TARGET_USER="${OAUTH2_TEST_USER:-admin}"
 
 echo "Getting admin token..."
 TOKEN=$(curl -sk -X POST "${BASE}/realms/${REALM}/protocol/openid-connect/token" \
@@ -23,7 +23,7 @@ fi
 echo "Getting certa client id..."
 CLIENT_ID=$(curl -sk -H "Authorization: Bearer ${TOKEN}" "${BASE}/admin/realms/${REALM}/clients?clientId=certa" | jq -r '.[0].id')
 if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "null" ]; then
-  echo "Client certa not found. Run create-keycloak-client.sh first."
+  echo "Client certa not found. Run create-oauth2-client.sh first."
   exit 1
 fi
 

@@ -1,0 +1,11 @@
+# Override for embedded OAuth2 (no Keycloak). Use with: docker compose -f docker-compose.yml -f docker-compose.embedded.yml up -d
+# Authority must match the app URL (e.g. https://localhost:8443).
+version: '3.8'
+
+services:
+  certa-app:
+    environment:
+      - Authentication__OAuth2__Enabled=true
+      - Authentication__OAuth2__UseEmbedded=true
+      - Authentication__OAuth2__Authority=https://localhost:8443
+      - Authentication__OAuth2__AuthorityInternal=https://localhost:8081

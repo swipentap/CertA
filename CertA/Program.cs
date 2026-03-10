@@ -7,10 +7,12 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
 using System.Net.Http;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using OpenIddict.Abstractions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,9 +30,15 @@ builder.Host.UseSerilog((ctx, lc) =>
 
 builder.Services.AddControllersWithViews(options =>
 {
-    var keycloakOn = builder.Configuration.GetValue<bool>($"{KeycloakOptions.SectionName}:Enabled");
-    if (keycloakOn)
+    var oauth2On = builder.Configuration.GetValue<bool>($"{OAuth2Options.SectionName}:Enabled");
+    if (oauth2On)
         options.Filters.Add(new Microsoft.AspNetCore.Mvc.Authorization.AuthorizeFilter());
+});
+builder.Services.AddAntiforgery(options =>
+{
+    options.Cookie.Path = "/";
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+    options.HeaderName = "X-XSRF-TOKEN";
 });
 
 // Database connection factory
@@ -47,8 +55,8 @@ builder.Services.AddScoped<ICertificateAuthorityService, CertificateAuthoritySer
 // Database initialization
 builder.Services.AddScoped<IDatabaseInitializationService, DatabaseInitializationService>();
 
-// Keycloak options
-builder.Services.Configure<KeycloakOptions>(builder.Configuration.GetSection(KeycloakOptions.SectionName));
+// OAuth2 options
+builder.Services.Configure<OAuth2Options>(builder.Configuration.GetSection(OAuth2Options.SectionName));
 
 // ACME options and services
 builder.Services.Configure<CertA.Options.AcmeOptions>(builder.Configuration.GetSection(CertA.Options.AcmeOptions.SectionName));
@@ -64,27 +72,58 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
-var keycloakEnabled = builder.Configuration.GetValue<bool>($"{KeycloakOptions.SectionName}:Enabled");
+var oauth2Enabled = builder.Configuration.GetValue<bool>($"{OAuth2Options.SectionName}:Enabled");
+var oauth2UseEmbedded = builder.Configuration.GetValue<bool>($"{OAuth2Options.SectionName}:UseEmbedded");
 
-// Configure Authentication: Cookie always; OpenIdConnect (Keycloak) when enabled
+if (oauth2UseEmbedded)
+{
+    var conn = builder.Configuration.GetConnectionString("DefaultConnection");
+    builder.Services.AddDbContext<OpenIddictDbContext>(options =>
+    {
+        options.UseNpgsql(conn);
+        options.UseOpenIddict();
+    });
+    builder.Services.AddOpenIddict()
+        .AddCore(options =>
+        {
+            options.UseEntityFrameworkCore()
+                .UseDbContext<OpenIddictDbContext>();
+        })
+        .AddServer(options =>
+        {
+            options.SetAuthorizationEndpointUris("/connect/authorize")
+                .SetTokenEndpointUris("/connect/token");
+            options.AllowAuthorizationCodeFlow().AllowRefreshTokenFlow();
+            options.AddDevelopmentEncryptionCertificate();
+            options.AddDevelopmentSigningCertificate();
+            options.UseAspNetCore()
+                .EnableAuthorizationEndpointPassthrough()
+                .EnableTokenEndpointPassthrough();
+        });
+}
+
+// Configure Authentication: Cookie always; OpenIdConnect (OAuth2) when enabled
 var authBuilder = builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme);
 authBuilder.AddCookie(options =>
 {
-    options.LoginPath = "/Account/Login";
+    options.LoginPath = "/login";
     options.LogoutPath = "/Account/Logout";
     options.AccessDeniedPath = "/Account/AccessDenied";
     options.ExpireTimeSpan = TimeSpan.FromHours(12);
     options.SlidingExpiration = true;
+    options.Cookie.Path = "/";
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.IsEssential = true;
     options.Events.OnValidatePrincipal = async context =>
     {
         await Task.CompletedTask;
     };
 });
 
-if (keycloakEnabled)
+if (oauth2Enabled)
 {
-    // Get certa client roles from access token (Keycloak puts resource_access there; ID token often does not).
-    static IEnumerable<string> GetKeycloakRolesFromAccessToken(string? accessToken, string? clientId)
+    // Get certa client roles from access token (OAuth2 IdP puts resource_access there; ID token often does not).
+    static IEnumerable<string> GetOAuth2RolesFromAccessToken(string? accessToken, string? clientId)
     {
         var roles = new List<string>();
         if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(clientId)) return roles;
@@ -115,28 +154,54 @@ if (keycloakEnabled)
         return roles.Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
-    var keycloakAuthority = builder.Configuration.GetValue<string>($"{KeycloakOptions.SectionName}:Authority") ?? "";
-    var keycloakClientId = builder.Configuration.GetValue<string>($"{KeycloakOptions.SectionName}:ClientId") ?? "";
-    var keycloakClientSecret = builder.Configuration.GetValue<string>($"{KeycloakOptions.SectionName}:ClientSecret") ?? "";
-    var keycloakCallbackPath = builder.Configuration.GetValue<string>($"{KeycloakOptions.SectionName}:CallbackPath") ?? "/signin-oidc";
-    var requireHttpsMetadata = builder.Configuration.GetValue<bool>($"{KeycloakOptions.SectionName}:RequireHttpsMetadata");
+    var oauth2Authority = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:Authority")?.TrimEnd('/') ?? "";
+    if (oauth2UseEmbedded && string.IsNullOrEmpty(oauth2Authority))
+        oauth2Authority = "https://localhost:8443";
+    var oauth2AuthorityInternal = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:AuthorityInternal")?.TrimEnd('/');
+    var oauth2ClientId = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:ClientId") ?? "";
+    var oauth2ClientSecret = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:ClientSecret") ?? "";
+    if (oauth2UseEmbedded && string.IsNullOrEmpty(oauth2ClientSecret))
+        oauth2ClientSecret = "certa-embedded-dev-secret";
+    var oauth2CallbackPath = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:CallbackPath") ?? "/signin-oidc";
+    var requireHttpsMetadata = builder.Configuration.GetValue<bool>($"{OAuth2Options.SectionName}:RequireHttpsMetadata");
 
     authBuilder.AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options =>
     {
-        options.Authority = keycloakAuthority;
-        options.ClientId = keycloakClientId;
-        options.ClientSecret = keycloakClientSecret;
-        options.CallbackPath = keycloakCallbackPath;
+        options.Authority = oauth2Authority;
+        if (!string.IsNullOrEmpty(oauth2AuthorityInternal))
+        {
+            options.MetadataAddress = oauth2AuthorityInternal + "/.well-known/openid-configuration";
+            options.TokenValidationParameters.ValidIssuers = new[] { oauth2Authority.TrimEnd('/'), oauth2AuthorityInternal.TrimEnd('/') };
+        }
+        options.ClientId = oauth2ClientId;
+        options.ClientSecret = oauth2ClientSecret;
+        options.CallbackPath = oauth2CallbackPath;
         options.RequireHttpsMetadata = requireHttpsMetadata;
         options.ResponseType = "code";
         options.SaveTokens = true;
-        options.GetClaimsFromUserInfoEndpoint = true;
+        options.GetClaimsFromUserInfoEndpoint = oauth2UseEmbedded;
         options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
         options.BackchannelHttpHandler = new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback = (_, _, _, _) => true
         };
         options.PushedAuthorizationBehavior = PushedAuthorizationBehavior.Disable;
+
+        if (!string.IsNullOrEmpty(oauth2AuthorityInternal) && !string.IsNullOrEmpty(oauth2Authority))
+        {
+            var authorityForRedirectBase = new Uri(oauth2Authority.TrimEnd('/')).GetLeftPart(UriPartial.Authority);
+            var internalAuthority = oauth2AuthorityInternal.TrimEnd('/');
+            options.Events.OnRedirectToIdentityProvider = context =>
+            {
+                var addr = context.ProtocolMessage.IssuerAddress;
+                if (!string.IsNullOrEmpty(addr) && addr.StartsWith(internalAuthority, StringComparison.OrdinalIgnoreCase))
+                {
+                    var pathAndQuery = new Uri(addr).PathAndQuery;
+                    context.ProtocolMessage.IssuerAddress = authorityForRedirectBase + pathAndQuery;
+                }
+                return Task.CompletedTask;
+            };
+        }
 
         options.Events.OnRemoteFailure = context =>
         {
@@ -150,24 +215,26 @@ if (keycloakEnabled)
         {
             var userService = context.HttpContext.RequestServices.GetRequiredService<IUserService>();
             var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-            var keycloakPrincipal = context.Principal;
+            var oidcPrincipal = context.Principal;
 
-            var email = keycloakPrincipal?.FindFirst(ClaimTypes.Email)?.Value
-                ?? keycloakPrincipal?.FindFirst("email")?.Value
-                ?? keycloakPrincipal?.FindFirst("preferred_username")?.Value;
-            if (string.IsNullOrEmpty(email))
+            var email = oidcPrincipal?.FindFirst(ClaimTypes.Email)?.Value
+                ?? oidcPrincipal?.FindFirst("email")?.Value
+                ?? oidcPrincipal?.FindFirst("preferred_username")?.Value;
+            var sub = oidcPrincipal?.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? oidcPrincipal?.FindFirst("sub")?.Value;
+            if (string.IsNullOrEmpty(email) && string.IsNullOrEmpty(sub))
             {
-                logger.LogWarning("Keycloak token has no email or preferred_username; rejecting.");
-                context.Fail("No email claim from Keycloak.");
+                logger.LogWarning("OAuth2 token has no email/sub; rejecting.");
+                context.Fail("No email/sub from OAuth2 provider.");
                 return;
             }
 
-            var user = await userService.GetUserByEmailAsync(email);
-            if (user == null)
+            var user = !string.IsNullOrEmpty(sub) ? await userService.GetUserByIdAsync(sub) : null
+                ?? (email != null ? await userService.GetUserByEmailAsync(email) : null);
+            if (user == null && !oauth2UseEmbedded)
             {
-                var name = keycloakPrincipal?.FindFirst(ClaimTypes.Name)?.Value ?? keycloakPrincipal?.FindFirst("name")?.Value ?? "";
-                var givenName = keycloakPrincipal?.FindFirst(ClaimTypes.GivenName)?.Value ?? keycloakPrincipal?.FindFirst("given_name")?.Value ?? "";
-                var familyName = keycloakPrincipal?.FindFirst(ClaimTypes.Surname)?.Value ?? keycloakPrincipal?.FindFirst("family_name")?.Value ?? "";
+                var name = oidcPrincipal?.FindFirst(ClaimTypes.Name)?.Value ?? oidcPrincipal?.FindFirst("name")?.Value ?? "";
+                var givenName = oidcPrincipal?.FindFirst(ClaimTypes.GivenName)?.Value ?? oidcPrincipal?.FindFirst("given_name")?.Value ?? "";
+                var familyName = oidcPrincipal?.FindFirst(ClaimTypes.Surname)?.Value ?? oidcPrincipal?.FindFirst("family_name")?.Value ?? "";
                 var newUser = new ApplicationUser
                 {
                     UserName = email,
@@ -179,13 +246,11 @@ if (keycloakEnabled)
                 };
                 var created = await userService.CreateUserAsync(newUser, Convert.ToBase64String(Guid.NewGuid().ToByteArray()));
                 if (!created)
-                {
-                    user = await userService.GetUserByEmailAsync(email);
-                }
+                    user = await userService.GetUserByEmailAsync(email!);
                 else
                 {
                     user = newUser;
-                    logger.LogInformation("Auto-provisioned user from Keycloak: {Email}", email);
+                    logger.LogInformation("Auto-provisioned user from OAuth2: {Email}", email);
                 }
             }
 
@@ -195,16 +260,25 @@ if (keycloakEnabled)
                 return;
             }
 
-            // Roles only from access token (resource_access.certa.roles). When Keycloak is on, whole site is admin-only.
-            var accessToken = context.TokenEndpointResponse?.GetParameter("access_token");
-            if (string.IsNullOrEmpty(accessToken) && context.Properties.Items.TryGetValue(".Token.access_token", out var stored) && stored != null)
-                accessToken = stored;
-            var keycloakRoles = GetKeycloakRolesFromAccessToken(accessToken, keycloakClientId).ToList();
-            var hasCertaAdmin = keycloakRoles.Any(r => string.Equals(r, "admin", StringComparison.OrdinalIgnoreCase));
-            if (!hasCertaAdmin)
+            List<string> oauth2Roles;
+            if (oauth2UseEmbedded)
             {
-                logger.LogWarning("Keycloak user {Email} rejected: certa client role 'admin' required.", email);
-                context.Fail("Access requires the certa admin role.");
+                oauth2Roles = oidcPrincipal?.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList()
+                    ?? oidcPrincipal?.FindAll("role").Select(c => c.Value).ToList()
+                    ?? new List<string>();
+            }
+            else
+            {
+                var accessToken = context.TokenEndpointResponse?.GetParameter("access_token");
+                if (string.IsNullOrEmpty(accessToken) && context.Properties.Items.TryGetValue(".Token.access_token", out var stored) && stored != null)
+                    accessToken = stored;
+                oauth2Roles = GetOAuth2RolesFromAccessToken(accessToken, oauth2ClientId).ToList();
+            }
+            var hasAdmin = oauth2Roles.Any(r => string.Equals(r, "admin", StringComparison.OrdinalIgnoreCase) || string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
+            if (!hasAdmin)
+            {
+                logger.LogWarning("OAuth2 user {Email} rejected: admin role required.", user.Email);
+                context.Fail("Access requires the admin role.");
                 return;
             }
             var claims = new List<Claim>
@@ -217,11 +291,10 @@ if (keycloakEnabled)
                 claims.Add(new Claim(ClaimTypes.GivenName, user.FirstName));
             if (!string.IsNullOrEmpty(user.LastName))
                 claims.Add(new Claim(ClaimTypes.Surname, user.LastName));
-            foreach (var role in keycloakRoles)
+            foreach (var role in oauth2Roles)
             {
                 if (string.IsNullOrEmpty(role)) continue;
                 claims.Add(new Claim(ClaimTypes.Role, role));
-                // So that [Authorize(Roles = "Admin")] works when Keycloak has "admin"
                 if (string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase) && role != "Admin")
                     claims.Add(new Claim(ClaimTypes.Role, "Admin"));
             }
@@ -257,6 +330,63 @@ using (var scope = app.Services.CreateScope())
         Console.WriteLine($"Database initialization failed: {ex.Message}");
     }
 
+    if (oauth2UseEmbedded)
+    {
+        var openIdCtx = scope.ServiceProvider.GetRequiredService<OpenIddictDbContext>();
+        await openIdCtx.Database.MigrateAsync();
+        var scopeManager = scope.ServiceProvider.GetRequiredService<IOpenIddictScopeManager>();
+        foreach (var scopeName in new[] { "openid", "profile", "email", "roles" })
+        {
+            if (await scopeManager.FindByNameAsync(scopeName) is null)
+            {
+                await scopeManager.CreateAsync(new OpenIddictScopeDescriptor
+                {
+                    Name = scopeName,
+                    DisplayName = scopeName
+                });
+            }
+        }
+        var appManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
+        var clientId = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:ClientId") ?? "certa";
+        var clientSecret = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:ClientSecret");
+        if (string.IsNullOrEmpty(clientSecret))
+            clientSecret = "certa-embedded-dev-secret";
+        var authority = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:Authority")?.TrimEnd('/') ?? "";
+        var callbackPath = builder.Configuration.GetValue<string>($"{OAuth2Options.SectionName}:CallbackPath") ?? "/signin-oidc";
+        var redirectUri = string.IsNullOrEmpty(authority) ? "https://localhost:8443/signin-oidc" : $"{authority}{callbackPath}";
+        var descriptor = new OpenIddictApplicationDescriptor
+        {
+            ClientId = clientId,
+            ClientType = OpenIddictConstants.ClientTypes.Confidential,
+            ClientSecret = string.IsNullOrEmpty(clientSecret) ? null : clientSecret,
+            DisplayName = "CertA",
+            RedirectUris = { new Uri(redirectUri) },
+            PostLogoutRedirectUris = { new Uri(authority.Length > 0 ? authority : "https://localhost:8443") },
+            Permissions =
+            {
+                OpenIddictConstants.Permissions.Endpoints.Authorization,
+                OpenIddictConstants.Permissions.Endpoints.Token,
+                OpenIddictConstants.Permissions.GrantTypes.AuthorizationCode,
+                OpenIddictConstants.Permissions.GrantTypes.RefreshToken,
+                OpenIddictConstants.Permissions.ResponseTypes.Code,
+                OpenIddictConstants.Permissions.Prefixes.Scope + "openid",
+                OpenIddictConstants.Permissions.Prefixes.Scope + "profile",
+                OpenIddictConstants.Permissions.Prefixes.Scope + "email",
+                OpenIddictConstants.Permissions.Prefixes.Scope + "roles"
+            }
+        };
+        var existingApp = await appManager.FindByClientIdAsync("certa");
+        if (existingApp is null)
+        {
+            await appManager.CreateAsync(descriptor);
+        }
+        else
+        {
+            await appManager.PopulateAsync(existingApp, descriptor);
+            await appManager.UpdateAsync(existingApp);
+        }
+    }
+
     // Create default admin user if no users exist, and ensure admin@certa.local has Admin role
     var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
     var existingAdmin = await userService.GetUserByEmailAsync("admin@certa.local");
@@ -283,6 +413,25 @@ using (var scope = app.Services.CreateScope())
     {
         await userService.EnsureUserInRoleAsync(existingAdmin.Id, "Admin");
     }
+
+    if (oauth2UseEmbedded)
+    {
+        var noAdmin = await userService.GetUserByEmailAsync("certa_noadmin@certa.local");
+        if (noAdmin == null)
+        {
+            var noAdminUser = new ApplicationUser
+            {
+                UserName = "certa_noadmin@certa.local",
+                Email = "certa_noadmin@certa.local",
+                FirstName = "NoAdmin",
+                LastName = "User",
+                EmailConfirmed = true,
+                IsActive = true
+            };
+            if (await userService.CreateUserAsync(noAdminUser, "noadmin123"))
+                Console.WriteLine("Embedded OAuth2 no-admin test user created: certa_noadmin@certa.local / noadmin123");
+        }
+    }
 }
 
 // Configure the HTTP request pipeline.
@@ -294,6 +443,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.UseRouting();
@@ -301,10 +451,17 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapControllers();
+// Serve SPA for "/" so authenticated users land on Vue app, not Razor dashboard
+app.MapGet("/", (IWebHostEnvironment env) =>
+{
+    var path = Path.Combine(env.WebRootPath ?? "wwwroot", "index.html");
+    return System.IO.File.Exists(path) ? Results.File(path, "text/html") : Results.NotFound();
+});
 app.MapControllerRoute(
     name: "default",
-    pattern: "{controller=Home}/{action=Index}/{id?}");
-
+    pattern: "{controller}/{action}/{id?}");
 app.MapGet("/health", () => Results.Ok());
+app.MapFallbackToFile("index.html");
 
 app.Run();

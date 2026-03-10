@@ -12,7 +12,7 @@ A comprehensive Certification Authority (CA) system with web-based certificate m
 
 ### 🔐 Authentication & Authorization
 - **User Registration & Login** - Secure user account management
-- **Keycloak (OAuth2 / OpenID Connect)** - Optional external identity provider; when enabled, login is via Keycloak with automatic user provisioning by email
+- **OAuth2 / OpenID Connect** - Optional external identity provider; when enabled, login is via the IdP with automatic user provisioning by email
 - **User Isolation** - Each user can only see and manage their own certificates
 - **Profile Management** - Users can update their information and change passwords
 - **Session Management** - Configurable cookie-based authentication with 12-hour sessions
@@ -154,25 +154,25 @@ ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_DATA_PROTECTION__DEFAULT_KEY_LIFETIME=90
 ASPNETCORE_DATA_PROTECTION__KEY_RING_AUTO_GENERATE_KEYS=true
 
-# Keycloak (OAuth2 / OpenID Connect) - optional
-Authentication__Keycloak__Enabled=true
-Authentication__Keycloak__Authority=https://auth.example.com/realms/myrealm
-Authentication__Keycloak__ClientId=certa
-Authentication__Keycloak__ClientSecret=
-Authentication__Keycloak__CallbackPath=/signin-oidc
-Authentication__Keycloak__RequireHttpsMetadata=true
+# OAuth2 / OpenID Connect - optional
+Authentication__OAuth2__Enabled=true
+Authentication__OAuth2__Authority=https://auth.example.com/realms/myrealm
+Authentication__OAuth2__ClientId=certa
+Authentication__OAuth2__ClientSecret=
+Authentication__OAuth2__CallbackPath=/signin-oidc
+Authentication__OAuth2__RequireHttpsMetadata=true
 ```
 
-See **[Keycloak authentication](docs/KEYCLOAK.md)** for full configuration of CertA and Keycloak.
+See **[OAuth2 authentication](docs/OAUTH2.md)** for full configuration of CertA and the IdP.
 
-### Keycloak (OAuth2) authentication
+### OAuth2 authentication
 
-When `Authentication:Keycloak:Enabled` is `true`, login uses Keycloak instead of the built-in form. You must:
+When `Authentication:OAuth2:Enabled` is `true`, login uses the OAuth2 IdP instead of the built-in form. You must:
 
-1. **In Keycloak:** Create a client (e.g. `certa`), set **Valid redirect URIs** to `https://<your-certa-url>/signin-oidc`, and optionally set a client secret.
+1. **In your IdP:** Create a client (e.g. `certa`), set **Valid redirect URIs** to `https://<your-certa-url>/signin-oidc`, and optionally set a client secret.
 2. **In CertA:** Set Authority (realm URL), ClientId, ClientSecret (if any), and CallbackPath `/signin-oidc`.
 
-Users signing in via Keycloak are created in CertA automatically (by email) on first login. Full step-by-step instructions: **[docs/KEYCLOAK.md](docs/KEYCLOAK.md)**.
+Users signing in via OAuth2 are created in CertA automatically (by email) on first login. Full step-by-step instructions: **[docs/OAUTH2.md](docs/OAUTH2.md)**.
 
 ### Docker Configuration
 - **PostgreSQL**: External database support
@@ -182,7 +182,7 @@ Users signing in via Keycloak are created in CertA automatically (by email) on f
 ## 📚 Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
-- **[Keycloak (OAuth2) authentication](docs/KEYCLOAK.md)** - Configure CertA and Keycloak for external login
+- **[OAuth2 authentication](docs/OAUTH2.md)** - Configure CertA and OAuth2 IdP for external login
 - **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment instructions
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - Technical architecture details
 - **[User Guide](docs/USER_GUIDE.md)** - End-user documentation
@@ -221,6 +221,15 @@ Users signing in via Keycloak are created in CertA automatically (by email) on f
 3. **Run** `dotnet restore` and `dotnet build`
 4. **Apply** database migrations: `dotnet ef database update`
 5. **Start** the application: `dotnet run`
+
+### E2E tests
+- **Location:** `CertA.UITests/` (Playwright + NUnit). `SpaTests.cs` targets the Vue SPA; `LogoutTests.cs` and `SmokeTests.cs` cover auth and smoke.
+- **Run:** Start the app, then from repo root:
+  ```bash
+  dotnet test CertA.UITests/CertA.UITests.csproj --settings CertA.runsettings
+  ```
+  Optional: `BASE_URL=https://localhost:8443` (or your app URL). For local-auth tests set OAuth2 disabled (or they are skipped).
+- **Results:** `TestResults/e2e-results.trx` (relative to current directory when running `dotnet test`).
 
 ### Database Migrations
 ```bash

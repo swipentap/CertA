@@ -4,7 +4,6 @@ using CertA.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using System.ComponentModel.DataAnnotations;
@@ -17,47 +16,25 @@ namespace CertA.Controllers
     {
         private readonly IUserService _userService;
         private readonly AuthService _authService;
-        private readonly KeycloakOptions _keycloakOptions;
+        private readonly OAuth2Options _oauth2Options;
         private readonly ILogger<AccountController> _logger;
 
         public AccountController(
             IUserService userService,
             AuthService authService,
-            IOptions<KeycloakOptions> keycloakOptions,
+            IOptions<OAuth2Options> oauth2Options,
             ILogger<AccountController> logger)
         {
             _userService = userService;
             _authService = authService;
-            _keycloakOptions = keycloakOptions.Value;
+            _oauth2Options = oauth2Options.Value;
             _logger = logger;
         }
 
         [Authorize]
-        public async Task<IActionResult> Profile()
+        public IActionResult Profile()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (string.IsNullOrEmpty(userId))
-            {
-                return RedirectToAction("Login");
-            }
-
-            var user = await _userService.GetUserByIdAsync(userId);
-            if (user == null)
-            {
-                return RedirectToAction("Login");
-            }
-
-            var model = new ProfileViewModel
-            {
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Email = user.Email,
-                Organization = user.Organization,
-                CreatedDate = user.CreatedDate,
-                IsActive = user.IsActive
-            };
-
-            return View(model);
+            return Redirect("/account/profile");
         }
 
         [Authorize]
@@ -65,24 +42,23 @@ namespace CertA.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Profile(ProfileViewModel model)
         {
-            if (!ModelState.IsValid)
-            {
-                return View(model);
-            }
-
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (string.IsNullOrEmpty(userId))
             {
-                return RedirectToAction("Login");
+                return Redirect("/login");
             }
 
             var user = await _userService.GetUserByIdAsync(userId);
             if (user == null)
             {
-                return RedirectToAction("Login");
+                return Redirect("/login");
             }
 
-            // Update user properties
+            if (!ModelState.IsValid)
+            {
+                return Redirect("/account/profile?error=" + Uri.EscapeDataString("Invalid input."));
+            }
+
             user.FirstName = model.FirstName;
             user.LastName = model.LastName;
             user.Organization = model.Organization;
@@ -90,13 +66,11 @@ namespace CertA.Controllers
             var updated = await _userService.UpdateUserAsync(user);
             if (updated)
             {
-                TempData["SuccessMessage"] = "Profile updated successfully!";
                 _logger.LogInformation("User {Email} updated their profile", user.Email);
-                return RedirectToAction("Profile");
+                return Redirect("/account/profile");
             }
 
-            ModelState.AddModelError("", "Failed to update profile.");
-            return View(model);
+            return Redirect("/account/profile?error=" + Uri.EscapeDataString("Failed to update profile."));
         }
 
         [Authorize]
@@ -140,21 +114,38 @@ namespace CertA.Controllers
         [HttpGet]
         public IActionResult AccessDenied(string? message = null)
         {
-            ViewData["Message"] = message ?? "You do not have access to this application.";
-            ViewData["HideLoginRegisterInNav"] = true;
-            return View();
+            var q = string.IsNullOrEmpty(message) ? "" : "?message=" + Uri.EscapeDataString(message);
+            return Redirect("/access-denied" + q);
         }
 
+        /// <summary>Returns 200 HTML with meta refresh. Use instead of 302 so browser processes Set-Cookie before navigating (fixes Playwright).</summary>
+        private static IActionResult SignInCompleteHtml(string dest)
+        {
+            var escaped = dest.Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+            return new ContentResult
+            {
+                Content = $"<!DOCTYPE html><html><head><meta http-equiv=\"refresh\" content=\"0;url={escaped}\"/></head><body>Signing in...</body></html>",
+                ContentType = "text/html; charset=utf-8",
+                StatusCode = 200
+            };
+        }
+
+        /// <summary>OIDC post-signin: HTML response ensures browser processes Set-Cookie before SPA. Fixes Playwright cookie-after-redirect.</summary>
+        [AllowAnonymous]
+        [HttpGet]
+        public IActionResult SignInComplete(string? returnUrl = null)
+        {
+            var dest = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl : "/";
+            return SignInCompleteHtml(dest);
+        }
+
+        /// <summary>Redirects to SPA /login. SPA handles Keycloak (redirect to /api/auth/authorize) or embedded (show form).</summary>
         [AllowAnonymous]
         [HttpGet]
         public IActionResult Login(string? returnUrl = null)
         {
-            if (_keycloakOptions.Enabled)
-            {
-                return Challenge(new AuthenticationProperties { RedirectUri = returnUrl ?? "/" }, OpenIdConnectDefaults.AuthenticationScheme);
-            }
-            ViewData["ReturnUrl"] = returnUrl;
-            return View();
+            var q = string.IsNullOrEmpty(returnUrl) ? "" : "?returnUrl=" + Uri.EscapeDataString(returnUrl ?? "");
+            return Redirect("/login" + q);
         }
 
         [AllowAnonymous]
@@ -162,7 +153,7 @@ namespace CertA.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Login(LoginViewModel model, string? returnUrl = null)
         {
-            ViewData["ReturnUrl"] = returnUrl;
+        ViewData["ReturnUrl"] = returnUrl;
 
             if (ModelState.IsValid)
             {
@@ -175,27 +166,36 @@ namespace CertA.Controllers
                         IsPersistent = model.RememberMe,
                         ExpiresUtc = model.RememberMe ? DateTimeOffset.UtcNow.AddDays(30) : DateTimeOffset.UtcNow.AddHours(12)
                     };
-
                     await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, authProperties);
-                    
-                    _logger.LogInformation("User logged in: {Email}", model.Email);
-                    return RedirectToLocal(returnUrl);
+
+                    if (_oauth2Options.Enabled)
+                    {
+                        var roles = await _userService.GetUserRolesAsync(user.Id);
+                        var hasAdmin = roles.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
+                        if (!hasAdmin)
+                        {
+                            _logger.LogWarning("User {Email} has no Admin role; redirecting to access-denied.", model.Email);
+                            return Redirect("/access-denied?message=" + Uri.EscapeDataString("Admin role required."));
+                        }
+                    }
+                    var redirectUrl = !string.IsNullOrEmpty(model.ReturnUrl) ? model.ReturnUrl : returnUrl;
+                    _logger.LogInformation("User logged in: {Email} redirecting to {RedirectUrl}", model.Email, redirectUrl ?? "(null)");
+                    return RedirectToLocal(redirectUrl);
                 }
                 else
                 {
-                    ModelState.AddModelError(string.Empty, "Invalid login attempt.");
-                    return View(model);
+                    return Redirect("/login?error=" + Uri.EscapeDataString("Invalid login attempt."));
                 }
             }
 
-            return View(model);
+            return Redirect("/login?error=" + Uri.EscapeDataString("Invalid input."));
         }
 
         [HttpGet]
         public IActionResult Register(string? returnUrl = null)
         {
-            ViewData["ReturnUrl"] = returnUrl;
-            return View();
+            var q = string.IsNullOrEmpty(returnUrl) ? "" : "?returnUrl=" + Uri.EscapeDataString(returnUrl ?? "");
+            return Redirect("/register" + q);
         }
 
         [HttpPost]
@@ -223,16 +223,22 @@ namespace CertA.Controllers
                     var principal = await _authService.CreateClaimsPrincipalAsync(user);
                     await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
                     
-                    return RedirectToLocal(returnUrl);
+                    var redirectUrl = !string.IsNullOrEmpty(model.ReturnUrl) ? model.ReturnUrl : returnUrl;
+                    return RedirectToLocal(redirectUrl);
                 }
                 else
                 {
-                    ModelState.AddModelError(string.Empty, "Failed to create account. Email may already be in use.");
+                    return Redirect("/register?error=" + Uri.EscapeDataString("Failed to create account. Email may already be in use."));
                 }
             }
 
-            return View(model);
+            return Redirect("/register?error=" + Uri.EscapeDataString("Invalid input."));
         }
+
+        [AllowAnonymous]
+        [HttpGet]
+        [ActionName("Logout")]
+        public IActionResult LogoutGet() => StatusCode(405);
 
         [AllowAnonymous]
         [HttpPost]
@@ -240,16 +246,16 @@ namespace CertA.Controllers
         public async Task<IActionResult> Logout()
         {
             _logger.LogInformation("User logged out.");
-            if (_keycloakOptions.Enabled)
+            if (_oauth2Options.Enabled && !_oauth2Options.UseEmbedded)
             {
                 await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
                 var redirectUri = $"{Request.Scheme}://{Request.Host}/";
-                var authority = _keycloakOptions.Authority.TrimEnd('/');
-                var logoutUrl = $"{authority}/protocol/openid-connect/logout?client_id={Uri.EscapeDataString(_keycloakOptions.ClientId)}&post_logout_redirect_uri={Uri.EscapeDataString(redirectUri)}";
+                var authority = _oauth2Options.Authority.TrimEnd('/');
+                var logoutUrl = $"{authority}/protocol/openid-connect/logout?client_id={Uri.EscapeDataString(_oauth2Options.ClientId)}&post_logout_redirect_uri={Uri.EscapeDataString(redirectUri)}";
                 return Redirect(logoutUrl);
             }
             return SignOut(
-                new AuthenticationProperties { RedirectUri = Url.Action("Index", "Home") ?? "/" },
+                new AuthenticationProperties { RedirectUri = "/login" },
                 CookieAuthenticationDefaults.AuthenticationScheme);
         }
 

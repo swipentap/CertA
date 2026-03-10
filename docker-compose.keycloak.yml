@@ -1,0 +1,47 @@
+# Override for Keycloak IdP. Use with: docker compose -f docker-compose.yml -f docker-compose.keycloak.yml up -d
+# CertA uses Keycloak realm "certa" with client "certa".
+# Users: admin@certa.local / Admin123!, certa_noadmin@certa.local / noadmin123.
+# After first start, run once to assign certa admin role to admin:
+#   OAUTH2_IDP_BASE_URL=http://localhost:8180 OAUTH2_IDP_REALM=certa \
+#   OAUTH2_IDP_ADMIN_USER=admin OAUTH2_IDP_ADMIN_PASSWORD=admin OAUTH2_TEST_USER=admin \
+#   ./scripts/setup-keycloak-certa.sh
+version: '3.8'
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: certa-keycloak
+    command:
+      - start-dev
+      - --import-realm
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+      - KC_HTTP_PORT=8080
+      - KC_HTTPS_PORT=8443
+    ports:
+      - "8180:8080"
+      - "8445:8443"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/certa/.well-known/openid-configuration HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  certa-app:
+    environment:
+      - Authentication__OAuth2__Enabled=true
+      - Authentication__OAuth2__UseEmbedded=false
+      - Authentication__OAuth2__Authority=http://localhost:8180/realms/certa
+      - Authentication__OAuth2__AuthorityInternal=http://keycloak:8080/realms/certa
+      - Authentication__OAuth2__ClientId=certa
+      - Authentication__OAuth2__ClientSecret=
+      - Authentication__OAuth2__CallbackPath=/signin-oidc
+      - Authentication__OAuth2__RequireHttpsMetadata=false
+    depends_on:
+      keycloak:
+        condition: service_healthy

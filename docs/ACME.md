@@ -60,4 +60,4 @@ ACME uses these tables (see `Scripts/acme-schema.sql`):
 ## Security
 
 - ACME endpoints allow anonymous access (no cookie auth). Authentication is via JWS with account key.
-- When Keycloak is enabled, ACME controller uses `[AllowAnonymous]` so clients can reach it without login.
+- When OAuth2 is enabled, ACME controller uses `[AllowAnonymous]` so clients can reach it without login.

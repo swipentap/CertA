@@ -24,87 +24,48 @@ namespace CertA.Controllers
             _logger = logger;
         }
 
-        public async Task<IActionResult> Index()
+        public IActionResult Index()
         {
-            try
-            {
-                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                if (string.IsNullOrEmpty(userId))
-                {
-                    return RedirectToAction("Login", "Account");
-                }
-
-                var certificates = await _service.ListAsync(userId);
-                return View(certificates);
-            }
-            catch (Exception ex)
-            {
-                return View(new List<CertificateEntity>());
-            }
+            return Redirect("/certificates");
         }
 
-        public async Task<IActionResult> Details(int id)
+        public IActionResult Details(int id)
         {
-            try
-            {
-                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                if (string.IsNullOrEmpty(userId))
-                {
-                    return RedirectToAction("Login", "Account");
-                }
-
-                var cert = await _service.GetAsync(id, userId);
-                if (cert == null) return NotFound();
-
-                // Generate HAProxy content for display
-                var haproxyBytes = await _service.GetHAProxyFormatAsync(id, userId);
-                var haproxyContent = System.Text.Encoding.UTF8.GetString(haproxyBytes);
-
-                var viewModel = new CertificateDetailsVm
-                {
-                    Certificate = cert,
-                    HAProxyContent = haproxyContent
-                };
-
-                return View(viewModel);
-            }
-            catch (Exception ex)
-            {
-                return NotFound();
-            }
+            return Redirect($"/certificates/{id}");
         }
 
         public IActionResult Create()
         {
-            return View(new CreateCertificateVm());
+            return Redirect("/certificates/create");
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(CreateCertificateVm vm)
         {
-            if (!ModelState.IsValid) return View(vm);
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Redirect("/login");
+            }
 
             try
             {
-                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                if (string.IsNullOrEmpty(userId))
+                if (!ModelState.IsValid)
                 {
-                    return RedirectToAction("Login", "Account");
+                    return Redirect("/certificates/create?error=" + Uri.EscapeDataString("Invalid input."));
                 }
 
                 _logger.LogInformation("Creating {Type} certificate for {CommonName} by user {UserId}", vm.Type, vm.CommonName, userId);
                 var created = await _service.CreateAsync(vm.CommonName, vm.SubjectAlternativeNames, vm.Type, userId);
-                _logger.LogInformation("Successfully created certificate {Id} for {CommonName}", created.Id, vm.CommonName);
-                return RedirectToAction(nameof(Details), new { id = created.Id });
+                _logger.LogInformation("Successfully created certificate {Id} for {CommonName}", created.Id, created.CommonName);
+                return Redirect($"/certificates/{created.Id}");
             }
             catch (Exception ex)
             {
-                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                _logger.LogError(ex, "Failed to create {Type} certificate for {CommonName} by user {UserId}: {Message}", 
+                _logger.LogError(ex, "Failed to create {Type} certificate for {CommonName} by user {UserId}: {Message}",
                     vm.Type, vm.CommonName, userId, ex.Message);
-                ModelState.AddModelError("", $"Failed to create certificate: {ex.Message}");
-                return View(vm);
+                return Redirect("/certificates/create?error=" + Uri.EscapeDataString(ex.Message));
             }
         }
 
@@ -115,7 +76,7 @@ namespace CertA.Controllers
                 var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return RedirectToAction("Login", "Account");
+                    return Redirect("/login");
                 }
 
                 var cert = await _service.GetAsync(id, userId);
@@ -138,7 +99,7 @@ namespace CertA.Controllers
                 var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return RedirectToAction("Login", "Account");
+                    return Redirect("/login");
                 }
 
                 var cert = await _service.GetAsync(id, userId);
@@ -161,7 +122,7 @@ namespace CertA.Controllers
                 var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return RedirectToAction("Login", "Account");
+                    return Redirect("/login");
                 }
 
                 var cert = await _service.GetAsync(id, userId);
@@ -184,7 +145,7 @@ namespace CertA.Controllers
                 var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return RedirectToAction("Login", "Account");
+                    return Redirect("/login");
                 }
 
                 var cert = await _service.GetAsync(id, userId);
@@ -207,7 +168,7 @@ namespace CertA.Controllers
                 var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return RedirectToAction("Login", "Account");
+                    return Redirect("/login");
                 }
 
                 var cert = await _service.GetAsync(id, userId);
@@ -223,22 +184,9 @@ namespace CertA.Controllers
             }
         }
 
-        public async Task<IActionResult> Authority()
+        public IActionResult Authority()
         {
-            try
-            {
-                var ca = await _caService.GetActiveCAAsync();
-                return View(ca);
-            }
-            catch (Exception ex)
-            {
-                // Log the exception for debugging
-                _logger.LogError(ex, "Error in Authority action: {Message}", ex.Message);
-                
-                // Return the view with null model instead of NotFound
-                // This will show the "No Certificate Authority Found" message
-                return View((CertificateAuthority?)null);
-            }
+            return Redirect("/certificates/authority");
         }
 
         public async Task<IActionResult> DownloadRootCA()
@@ -288,7 +236,7 @@ namespace CertA.Controllers
                 var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return RedirectToAction("Login", "Account");
+                    return Redirect("/login");
                 }
 
                 var success = await _service.DeleteAsync(id, userId);
@@ -307,7 +255,7 @@ namespace CertA.Controllers
                 TempData["ErrorMessage"] = "An error occurred while deleting the certificate.";
             }
 
-            return RedirectToAction("Index");
+            return Redirect("/certificates");
         }
     }
 

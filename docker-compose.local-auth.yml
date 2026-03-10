@@ -1,0 +1,10 @@
+# Override for local auth (OAuth2 disabled). Use with: docker compose -f docker-compose.yml -f docker-compose.local-auth.yml up -d
+# Then run RequiresLocalAuth tests with BASE_URL=https://localhost:8444
+version: '3.8'
+
+services:
+  certa-app:
+    ports:
+      - "8444:8081"
+    environment:
+      - Authentication__OAuth2__Enabled=false

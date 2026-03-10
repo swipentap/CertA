@@ -6,3 +6,4 @@ riderModule.iml
 
 # ASP.NET Core Data Protection key ring (sensitive)
 **/DataProtection-Keys/
+.aider*

@@ -34,12 +34,12 @@ services:
       - ConnectionStrings__DefaultConnection=Host=postgres;Database=certa;Username=certa;Password=certa123;Port=5432
       - ASPNETCORE_DATA_PROTECTION__DEFAULT_KEY_LIFETIME=90
       - ASPNETCORE_DATA_PROTECTION__KEY_RING_AUTO_GENERATE_KEYS=true
-      - Authentication__Keycloak__Enabled=true
-      - Authentication__Keycloak__Authority=https://auth.dev.net/auth/realms/master
-      - Authentication__Keycloak__ClientId=certa
-      - Authentication__Keycloak__ClientSecret=
-      - Authentication__Keycloak__CallbackPath=/signin-oidc
-      - Authentication__Keycloak__RequireHttpsMetadata=false
+      - Authentication__OAuth2__Enabled=true
+      - Authentication__OAuth2__Authority=https://auth.dev.net/auth/realms/master
+      - Authentication__OAuth2__ClientId=certa
+      - Authentication__OAuth2__ClientSecret=
+      - Authentication__OAuth2__CallbackPath=/signin-oidc
+      - Authentication__OAuth2__RequireHttpsMetadata=false
     depends_on:
       postgres:
         condition: service_healthy

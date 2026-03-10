@@ -23,54 +23,20 @@ namespace CertA.Controllers
             _caService = caService;
         }
 
-        public async Task<IActionResult> Index()
+        public IActionResult Index()
         {
-            if (User.Identity?.IsAuthenticated == true)
-            {
-                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                var dashboardData = new DashboardViewModel
-                {
-                    TotalCertificates = 0,
-                    ActiveCA = false,
-                    RecentCertificates = new List<CertificateEntity>()
-                };
-
-                try
-                {
-                    // Get real certificate count
-                    if (!string.IsNullOrEmpty(userId))
-                    {
-                        var certificates = await _certificateService.ListAsync(userId);
-                        dashboardData.TotalCertificates = certificates.Count;
-                        dashboardData.RecentCertificates = certificates.Take(5).ToList();
-                    }
-
-                    // Check if there's an active CA
-                    var activeCA = await _caService.GetActiveCAAsync();
-                    dashboardData.ActiveCA = activeCA != null;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error loading dashboard data");
-                }
-
-                return View(dashboardData);
-            }
-            else
-            {
-                return RedirectToAction("Login", "Account");
-            }
+            return Redirect("/");
         }
 
         public IActionResult Privacy()
         {
-            return View();
+            return Redirect("/privacy");
         }
 
         [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
         public IActionResult Error()
         {
-            return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+            return Redirect("/");
         }
     }
 }

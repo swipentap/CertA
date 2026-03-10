@@ -1,4 +1,4 @@
-@inject Microsoft.Extensions.Options.IOptions<CertA.Options.KeycloakOptions> KeycloakOptions
+@inject Microsoft.Extensions.Options.IOptions<CertA.Options.OAuth2Options> OAuth2Options
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -67,7 +67,7 @@
                                 </ul>
                             </li>
                         }
-                        else if (ViewData["HideLoginRegisterInNav"] as bool? == true && KeycloakOptions.Value.Enabled)
+                        else if (ViewData["HideLoginRegisterInNav"] as bool? == true && OAuth2Options.Value.Enabled)
                         {
                             <li class="nav-item">
                                 <form asp-controller="Account" asp-action="Logout" method="post" class="d-inline" asp-antiforgery="true">
@@ -84,7 +84,7 @@
                                     <i class="bi bi-box-arrow-in-right"></i> Login
                                 </a>
                             </li>
-                            @if (!KeycloakOptions.Value.Enabled)
+                            @if (!OAuth2Options.Value.Enabled)
                             {
                                 <li class="nav-item">
                                     <a class="nav-link text-light" href="/Account/Register">

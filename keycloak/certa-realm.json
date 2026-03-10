@@ -1,0 +1,94 @@
+{
+  "id": "certa",
+  "realm": "certa",
+  "enabled": true,
+  "sslRequired": "external",
+  "loginTheme": "keycloak",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "permanentLockout": false,
+  "roles": {
+    "client": {
+      "certa": [
+        {
+          "name": "admin",
+          "clientRole": true
+        }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "certa",
+      "name": "CertA",
+      "description": "CertA Certificate Authority",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [
+        "https://localhost:8443/signin-oidc",
+        "https://localhost:8443/*"
+      ],
+      "webOrigins": [
+        "https://localhost:8443",
+        "+"
+      ],
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@certa.local",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Admin123!",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "certa_noadmin",
+      "enabled": true,
+      "email": "certa_noadmin@certa.local",
+      "emailVerified": true,
+      "firstName": "NoAdmin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "noadmin123",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

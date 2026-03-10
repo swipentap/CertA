@@ -65,13 +65,13 @@ public class ApplicationUser : IdentityUser
 ```
 
 #### Authentication Flow
-1. **Registration**: User creates account with email/password (or is auto-provisioned when using Keycloak)
-2. **Login**: User authenticates with credentials, or is redirected to Keycloak (OAuth2 / OpenID Connect) when enabled
+1. **Registration**: User creates account with email/password (or is auto-provisioned when using OAuth2)
+2. **Login**: User authenticates with credentials, or is redirected to the OAuth2 IdP (OpenID Connect) when enabled
 3. **Session Management**: Cookie-based sessions with configurable timeout
 4. **Authorization**: Role-based access control (future enhancement)
 
-#### Optional: Keycloak (OAuth2 / OpenID Connect)
-When configured, CertA can use Keycloak as an external identity provider. Login then redirects to Keycloak; on callback, CertA finds or creates a user by email and issues a local cookie. User and certificate data remain in CertA. See [Keycloak authentication](KEYCLOAK.md) for configuration.
+#### Optional: OAuth2 / OpenID Connect
+When configured, CertA can use an OAuth2 identity provider. Login then redirects to the IdP; on callback, CertA finds or creates a user by email and issues a local cookie. User and certificate data remain in CertA. See [OAuth2 authentication](OAUTH2.md) for configuration.
 
 ### Authorization Model
 
